@@ -1,13 +1,14 @@
 import { useState, useRef } from 'react'
 import './Canvas.css'
 
-function Canvas({ elements, selectedIds, setSelectedIds, updateElement, onContextMenu, snapToGrid, gridSnap, showGrid, gridSize, onHistorySave }) {
+function Canvas({ elements, selectedIds, setSelectedIds, updateElement, batchUpdateElements, onContextMenu, snapToGrid, showGrid, gridSize, onHistorySave }) {
   const canvasRef = useRef(null)
   const [dragging, setDragging] = useState(null)
   const [resizing, setResizing] = useState(null)
   const [rotating, setRotating] = useState(null)
   const [editingText, setEditingText] = useState(null)
-  const [selectionBox, setSelectionBox] = useState(null)
+  const [areaDrag, setAreaDrag] = useState(null) // For area selection + drag
+  // areaDrag states: isSelecting (drawing box), isReady (box done, waiting for hold), isDragging (moving elements)
 
   const handleMouseDown = (e, element, action = 'drag', handle = null) => {
     e.stopPropagation()
@@ -73,6 +74,42 @@ function Canvas({ elements, selectedIds, setSelectedIds, updateElement, onContex
       })
     }
 
+    // Handle area drag - move all elements inside the selection area (only when isDragging)
+    if (areaDrag && areaDrag.isDragging) {
+      const totalDeltaX = e.clientX - areaDrag.dragStartX
+      const totalDeltaY = e.clientY - areaDrag.dragStartY
+
+      // Build batch updates for all elements
+      const updates = areaDrag.elementOffsets.map(({ id, initialX, initialY }) => ({
+        id,
+        changes: {
+          x: snapToGrid(Math.max(0, initialX + totalDeltaX)),
+          y: snapToGrid(Math.max(0, initialY + totalDeltaY))
+        }
+      }))
+
+      // Update all elements in one batch
+      batchUpdateElements(updates)
+
+      // Update area position too
+      setAreaDrag({
+        ...areaDrag,
+        x: areaDrag.initialBoxX + totalDeltaX,
+        y: areaDrag.initialBoxY + totalDeltaY,
+        lastX: e.clientX,
+        lastY: e.clientY
+      })
+    }
+
+    // Handle area selection (drawing the box) - only when isSelecting
+    if (areaDrag && areaDrag.isSelecting) {
+      setAreaDrag({
+        ...areaDrag,
+        endX: e.clientX,
+        endY: e.clientY
+      })
+    }
+
 
     if (resizing) {
       const { handle, startMouseX, startMouseY, startX, startY, startWidth, startHeight } = resizing
@@ -132,16 +169,6 @@ function Canvas({ elements, selectedIds, setSelectedIds, updateElement, onContex
       const angle = Math.atan2(e.clientY - centerY, e.clientX - centerX) * (180 / Math.PI) + 90
       updateElement(rotating.id, { rotation: Math.round(angle) }, false)
     }
-
-    if (selectionBox) {
-      const { startX, startY } = selectionBox
-      setSelectionBox({
-        startX,
-        startY,
-        endX: e.clientX,
-        endY: e.clientY
-      })
-    }
   }
 
   const handleMouseUp = () => {
@@ -149,21 +176,21 @@ function Canvas({ elements, selectedIds, setSelectedIds, updateElement, onContex
       onHistorySave()
     }
 
-    if (selectionBox) {
-      const { startX, startY, endX, endY } = selectionBox
-      const minX = Math.min(startX, endX)
-      const maxX = Math.max(startX, endX)
-      const minY = Math.min(startY, endY)
-      const maxY = Math.max(startY, endY)
+    // Finish area selection - convert to ready state (box stays, waiting for hold to drag)
+    if (areaDrag && areaDrag.isSelecting) {
+      finalizeAreaSelection()
+      return
+    }
 
-      const selected = elements.filter(el => {
-        const elCenterX = el.x + el.width / 2
-        const elCenterY = el.y + el.height / 2
-        return elCenterX >= minX && elCenterX <= maxX && elCenterY >= minY && elCenterY <= maxY
+    // Finish area drag
+    if (areaDrag && areaDrag.isDragging) {
+      onHistorySave()
+      // Go back to ready state instead of clearing
+      setAreaDrag({
+        ...areaDrag,
+        isDragging: false,
+        isReady: true
       })
-
-      setSelectedIds(selected.map(el => el.id))
-      setSelectionBox(null)
     }
 
     setDragging(null)
@@ -175,22 +202,188 @@ function Canvas({ elements, selectedIds, setSelectedIds, updateElement, onContex
     if (e.target === canvasRef.current) {
       setSelectedIds([])
       setEditingText(null)
+      // Don't clear area here - let handleCanvasMouseDown handle it
     }
   }
 
   const handleCanvasMouseDown = (e) => {
-    if (e.target === canvasRef.current && !e.shiftKey) {
-      setSelectionBox({
-        startX: e.clientX,
-        startY: e.clientY,
-        endX: e.clientX,
-        endY: e.clientY
+    // Only handle if clicking directly on canvas (not on elements or area box)
+    if (e.target !== canvasRef.current) return
+
+    // If there's already a ready area, clicking outside clears it
+    if (areaDrag && areaDrag.isReady) {
+      setAreaDrag(null)
+      setSelectedIds([])
+      return
+    }
+
+    // Clear selection
+    setSelectedIds([])
+
+    const startX = e.clientX
+    const startY = e.clientY
+
+    // Start area selection
+    setAreaDrag({
+      startX,
+      startY,
+      endX: startX,
+      endY: startY,
+      isSelecting: true,
+      isReady: false,
+      isDragging: false,
+      elementIds: [],
+      elementOffsets: [],
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      lastX: startX,
+      lastY: startY
+    })
+  }
+
+  // Handle mouse down on the area box (to start dragging)
+  const handleAreaBoxMouseDown = (e) => {
+    e.stopPropagation()
+    if (!areaDrag || !areaDrag.isReady) return
+
+    // Store current positions of elements for dragging
+    const currentElements = elements.filter(el => areaDrag.elementIds.includes(el.id))
+    const elementOffsets = currentElements.map(el => ({
+      id: el.id,
+      initialX: el.x,
+      initialY: el.y
+    }))
+
+    setAreaDrag({
+      ...areaDrag,
+      isReady: false,
+      isDragging: true,
+      elementOffsets,
+      initialBoxX: areaDrag.x,
+      initialBoxY: areaDrag.y,
+      dragStartX: e.clientX,
+      dragStartY: e.clientY,
+      lastX: e.clientX,
+      lastY: e.clientY
+    })
+  }
+
+  // Handle right click on area box
+  const handleAreaBoxRightClick = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!areaDrag || !areaDrag.isReady || areaDrag.elementIds.length === 0) return
+
+    // Pass all element IDs directly to context menu
+    onContextMenu(e, null, areaDrag.elementIds)
+  }
+
+  // When area selection is done (mouse up), convert to ready state
+  const finalizeAreaSelection = () => {
+    if (!areaDrag || !areaDrag.isSelecting) return
+
+    const { startX, startY, endX, endY } = areaDrag
+    const minX = Math.min(startX, endX)
+    const maxX = Math.max(startX, endX)
+    const minY = Math.min(startY, endY)
+    const maxY = Math.max(startY, endY)
+    const width = maxX - minX
+    const height = maxY - minY
+
+    // Too small, just clear
+    if (width < 10 || height < 10) {
+      setAreaDrag(null)
+      return
+    }
+
+    // Find elements that OVERLAP with the area
+    const insideElements = elements.filter(el => {
+      const elRight = el.x + el.width
+      const elBottom = el.y + el.height
+      return (
+        el.x < maxX &&
+        elRight > minX &&
+        el.y < maxY &&
+        elBottom > minY
+      )
+    })
+
+    if (insideElements.length > 0) {
+      // Has elements - convert to ready state (waiting for hold to drag)
+      setAreaDrag({
+        ...areaDrag,
+        isSelecting: false,
+        isReady: true,
+        isDragging: false,
+        elementIds: insideElements.map(el => el.id),
+        x: minX,
+        y: minY,
+        width,
+        height
       })
+    } else {
+      // No elements - just clear
+      setAreaDrag(null)
     }
   }
 
+  // Get elements that are inside the current area selection (for visual feedback)
+  const getElementsInArea = () => {
+    if (!areaDrag) return []
+
+    const { startX, startY, endX, endY, isSelecting, isReady, isDragging, elementIds } = areaDrag
+
+    // If ready or dragging, return the stored elementIds
+    if (isReady || isDragging) return elementIds
+
+    // If selecting, calculate in real-time
+    if (isSelecting) {
+      const minX = Math.min(startX, endX)
+      const maxX = Math.max(startX, endX)
+      const minY = Math.min(startY, endY)
+      const maxY = Math.max(startY, endY)
+
+      return elements.filter(el => {
+        const elRight = el.x + el.width
+        const elBottom = el.y + el.height
+        return (
+          el.x < maxX &&
+          elRight > minX &&
+          el.y < maxY &&
+          elBottom > minY
+        )
+      }).map(el => el.id)
+    }
+
+    return []
+  }
+
+  const elementsInArea = getElementsInArea()
+
   const handleRightClick = (e, elementId = null) => {
     e.preventDefault()
+    e.stopPropagation()
+
+    // If there's an active area (ready state), ALL right-clicks inside should affect all elements in area
+    if (areaDrag && (areaDrag.isReady || areaDrag.isDragging) && areaDrag.elementIds && areaDrag.elementIds.length > 0) {
+      // Check if click is inside the area box OR on an element that's in the area
+      const isInsideAreaBox = (
+        e.clientX >= areaDrag.x &&
+        e.clientX <= areaDrag.x + areaDrag.width &&
+        e.clientY >= areaDrag.y &&
+        e.clientY <= areaDrag.y + areaDrag.height
+      )
+      const isElementInArea = elementId && areaDrag.elementIds.includes(elementId)
+
+      if (isInsideAreaBox || isElementInArea) {
+        onContextMenu(e, null, areaDrag.elementIds)
+        return
+      }
+    }
+
+    // Normal right-click (no area or outside area)
     onContextMenu(e, elementId)
   }
 
@@ -294,13 +487,18 @@ function Canvas({ elements, selectedIds, setSelectedIds, updateElement, onContex
       onMouseDown={handleCanvasMouseDown}
       onMouseLeave={handleMouseUp}
       onClick={handleCanvasClick}
-      onContextMenu={(e) => handleRightClick(e)}
+      onContextMenu={(e) => {
+        // Only handle if clicking directly on canvas background
+        if (e.target === canvasRef.current) {
+          handleRightClick(e)
+        }
+      }}
       style={gridStyle}
     >
       {elements.map(element => (
         <div
           key={element.id}
-          className={`element ${selectedIds.includes(element.id) ? 'selected' : ''} ${element.locked ? 'locked' : ''}`}
+          className={`element ${selectedIds.includes(element.id) ? 'selected' : ''} ${element.locked ? 'locked' : ''} ${elementsInArea.includes(element.id) ? 'in-area' : ''}`}
           style={getShapeStyle(element)}
           onMouseDown={(e) => handleMouseDown(e, element, 'drag')}
           onDoubleClick={(e) => handleDoubleClick(e, element)}
@@ -399,14 +597,43 @@ function Canvas({ elements, selectedIds, setSelectedIds, updateElement, onContex
         </div>
       ))}
 
-      {selectionBox && (
+      {/* Area drag selection box - while selecting */}
+      {areaDrag && areaDrag.isSelecting && (
         <div
-          className="selection-box"
+          className="area-drag-box selecting"
           style={{
-            left: Math.min(selectionBox.startX, selectionBox.endX),
-            top: Math.min(selectionBox.startY, selectionBox.endY),
-            width: Math.abs(selectionBox.endX - selectionBox.startX),
-            height: Math.abs(selectionBox.endY - selectionBox.startY),
+            left: Math.min(areaDrag.startX, areaDrag.endX),
+            top: Math.min(areaDrag.startY, areaDrag.endY),
+            width: Math.abs(areaDrag.endX - areaDrag.startX),
+            height: Math.abs(areaDrag.endY - areaDrag.startY),
+          }}
+        />
+      )}
+
+      {/* Area drag box - ready state (waiting for hold to drag) */}
+      {areaDrag && areaDrag.isReady && (
+        <div
+          className="area-drag-box ready"
+          style={{
+            left: areaDrag.x,
+            top: areaDrag.y,
+            width: areaDrag.width,
+            height: areaDrag.height,
+          }}
+          onMouseDown={handleAreaBoxMouseDown}
+          onContextMenu={handleAreaBoxRightClick}
+        />
+      )}
+
+      {/* Area drag box - dragging state */}
+      {areaDrag && areaDrag.isDragging && (
+        <div
+          className="area-drag-box dragging"
+          style={{
+            left: areaDrag.x,
+            top: areaDrag.y,
+            width: areaDrag.width,
+            height: areaDrag.height,
           }}
         />
       )}

@@ -193,6 +193,21 @@ function App() {
     if (save) saveToHistory(newElements)
   }
 
+  // Batch update multiple elements with different updates each
+  const batchUpdateElements = (updates) => {
+    // updates is array of { id, changes }
+    setElements(prev => {
+      const newElements = prev.map(el => {
+        const update = updates.find(u => u.id === el.id)
+        if (update) {
+          return { ...el, ...update.changes }
+        }
+        return el
+      })
+      return newElements
+    })
+  }
+
   const updateElements = (ids, updates) => {
     const newElements = elements.map(el =>
       ids.includes(el.id) ? { ...el, ...updates } : el
@@ -201,15 +216,18 @@ function App() {
     saveToHistory(newElements)
   }
 
-  const deleteElements = () => {
-    const newElements = elements.filter(el => !selectedIds.includes(el.id))
+  const deleteElements = (targetIds = null) => {
+    const idsToDelete = Array.isArray(targetIds) ? targetIds : selectedIds
+    if (idsToDelete.length === 0) return
+    const newElements = elements.filter(el => !idsToDelete.includes(el.id))
     setElements(newElements)
     setSelectedIds([])
     saveToHistory(newElements)
   }
 
-  const copyElements = () => {
-    const els = elements.filter(e => selectedIds.includes(e.id))
+  const copyElements = (targetIds = null) => {
+    const idsToCopy = Array.isArray(targetIds) ? targetIds : selectedIds
+    const els = elements.filter(e => idsToCopy.includes(e.id))
     if (els.length > 0) setClipboard(els.map(el => ({ ...el })))
   }
 
@@ -228,8 +246,9 @@ function App() {
     }
   }
 
-  const duplicateElements = () => {
-    const els = elements.filter(e => selectedIds.includes(e.id))
+  const duplicateElements = (targetIds = null) => {
+    const idsToDuplicate = Array.isArray(targetIds) ? targetIds : selectedIds
+    const els = elements.filter(e => idsToDuplicate.includes(e.id))
     if (els.length > 0) {
       const newElements = els.map(el => ({
         ...el,
@@ -244,28 +263,36 @@ function App() {
     }
   }
 
-  const toggleLock = () => {
-    if (selectedIds.length > 0) {
-      const firstEl = elements.find(e => e.id === selectedIds[0])
+  const toggleLock = (targetIds = null) => {
+    const idsToToggle = Array.isArray(targetIds) ? targetIds : selectedIds
+    if (idsToToggle.length > 0) {
+      const firstEl = elements.find(e => e.id === idsToToggle[0])
+      if (!firstEl) return
       const newLocked = !firstEl.locked
-      updateElements(selectedIds, { locked: newLocked })
+      const newElements = elements.map(el =>
+        idsToToggle.includes(el.id) ? { ...el, locked: newLocked } : el
+      )
+      setElements(newElements)
+      saveToHistory(newElements)
     }
   }
 
-  const bringToFront = () => {
-    if (selectedIds.length > 0) {
-      const selected = elements.filter(e => selectedIds.includes(e.id))
-      const others = elements.filter(e => !selectedIds.includes(e.id))
+  const bringToFront = (targetIds = null) => {
+    const idsToMove = Array.isArray(targetIds) ? targetIds : selectedIds
+    if (idsToMove.length > 0) {
+      const selected = elements.filter(e => idsToMove.includes(e.id))
+      const others = elements.filter(e => !idsToMove.includes(e.id))
       const newElements = [...others, ...selected]
       setElements(newElements)
       saveToHistory(newElements)
     }
   }
 
-  const sendToBack = () => {
-    if (selectedIds.length > 0) {
-      const selected = elements.filter(e => selectedIds.includes(e.id))
-      const others = elements.filter(e => !selectedIds.includes(e.id))
+  const sendToBack = (targetIds = null) => {
+    const idsToMove = Array.isArray(targetIds) ? targetIds : selectedIds
+    if (idsToMove.length > 0) {
+      const selected = elements.filter(e => idsToMove.includes(e.id))
+      const others = elements.filter(e => !idsToMove.includes(e.id))
       const newElements = [...selected, ...others]
       setElements(newElements)
       saveToHistory(newElements)
@@ -273,9 +300,10 @@ function App() {
   }
 
   // Move layer up (one step forward)
-  const moveLayerUp = () => {
-    if (selectedIds.length !== 1) return
-    const index = elements.findIndex(e => e.id === selectedIds[0])
+  const moveLayerUp = (targetIds = null) => {
+    const idsToMove = Array.isArray(targetIds) ? targetIds : selectedIds
+    if (idsToMove.length !== 1) return
+    const index = elements.findIndex(e => e.id === idsToMove[0])
     if (index < elements.length - 1) {
       const newElements = [...elements]
       const temp = newElements[index]
@@ -287,9 +315,10 @@ function App() {
   }
 
   // Move layer down (one step backward)
-  const moveLayerDown = () => {
-    if (selectedIds.length !== 1) return
-    const index = elements.findIndex(e => e.id === selectedIds[0])
+  const moveLayerDown = (targetIds = null) => {
+    const idsToMove = Array.isArray(targetIds) ? targetIds : selectedIds
+    if (idsToMove.length !== 1) return
+    const index = elements.findIndex(e => e.id === idsToMove[0])
     if (index > 0) {
       const newElements = [...elements]
       const temp = newElements[index]
@@ -300,15 +329,33 @@ function App() {
     }
   }
 
-  const handleContextMenu = (e, elementId = null) => {
+  const handleContextMenu = (e, elementId = null, forceSelectedIds = null) => {
     e.preventDefault()
-    if (elementId && !selectedIds.includes(elementId)) {
-      setSelectedIds([elementId])
+
+    // If forceSelectedIds provided (from area selection), use it
+    if (forceSelectedIds && forceSelectedIds.length > 0) {
+      setSelectedIds(forceSelectedIds)
+      setContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        hasElement: true,
+        targetIds: forceSelectedIds // Store for actions
+      })
+      return
     }
+
+    // Normal right-click on element or canvas
+    let newSelectedIds = selectedIds
+    if (elementId && !selectedIds.includes(elementId)) {
+      newSelectedIds = [elementId]
+      setSelectedIds(newSelectedIds)
+    }
+
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
-      hasElement: elementId !== null || selectedIds.length > 0
+      hasElement: elementId !== null || newSelectedIds.length > 0,
+      targetIds: elementId ? (selectedIds.includes(elementId) ? selectedIds : [elementId]) : selectedIds
     })
   }
 
@@ -324,9 +371,9 @@ function App() {
         selectedIds={selectedIds}
         setSelectedIds={setSelectedIds}
         updateElement={updateElement}
+        batchUpdateElements={batchUpdateElements}
         onContextMenu={handleContextMenu}
         snapToGrid={snapToGrid}
-        gridSnap={gridSnap}
         showGrid={showGrid}
         gridSize={gridSize}
         onHistorySave={() => saveToHistory(elements)}
@@ -362,15 +409,15 @@ function App() {
           hasElement={contextMenu.hasElement}
           hasClipboard={!!clipboard}
           isLocked={selectedElement?.locked}
-          onCopy={copyElements}
+          onCopy={() => copyElements(contextMenu.targetIds)}
           onPaste={() => pasteElements(contextMenu.x, contextMenu.y)}
-          onDuplicate={duplicateElements}
-          onDelete={deleteElements}
-          onLock={toggleLock}
-          onBringToFront={bringToFront}
-          onSendToBack={sendToBack}
-          onMoveLayerUp={moveLayerUp}
-          onMoveLayerDown={moveLayerDown}
+          onDuplicate={() => duplicateElements(contextMenu.targetIds)}
+          onDelete={() => deleteElements(contextMenu.targetIds)}
+          onLock={() => toggleLock(contextMenu.targetIds)}
+          onBringToFront={() => bringToFront(contextMenu.targetIds)}
+          onSendToBack={() => sendToBack(contextMenu.targetIds)}
+          onMoveLayerUp={() => moveLayerUp(contextMenu.targetIds)}
+          onMoveLayerDown={() => moveLayerDown(contextMenu.targetIds)}
           onClose={closeContextMenu}
         />
       )}

@@ -43,6 +43,12 @@
   outline-offset: 2px;
 }
 
+/* Element inside area selection - blue dashed border */
+.element.in-area {
+  outline: 3px dashed #1a73e8;
+  outline-offset: 3px;
+}
+
 .resize-handle {
   position: absolute;
   background: #1a73e8;
@@ -137,4 +143,40 @@
   background: rgba(26, 115, 232, 0.1);
   pointer-events: none;
   z-index: 1000;
+}
+
+/* Area Drag Box Styles */
+.area-drag-box {
+  position: fixed;
+  border-radius: 8px;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.area-drag-box.selecting {
+  border: 3px dashed #10b981;
+  background: rgba(16, 185, 129, 0.15);
+  pointer-events: none;
+}
+
+.area-drag-box.ready {
+  border: 3px solid #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  cursor: grab;
+  /* Allow clicks to pass through to elements, but capture right-click */
+}
+
+.area-drag-box.ready:hover {
+  background: rgba(16, 185, 129, 0.2);
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.25);
+}
+
+.area-drag-box.dragging {
+  border: 3px solid #10b981;
+  background: rgba(16, 185, 129, 0.2);
+  cursor: grabbing;
+  pointer-events: none;
+  box-shadow: 0 8px 32px rgba(16, 185, 129, 0.3);
 }

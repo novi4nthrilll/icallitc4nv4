@@ -248,10 +248,36 @@ function CodeModal({ elements, onClose }) {
     return css.trim()
   }
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(activeTab === 'html' ? generateHTML() : generateCSS())
-    setCopied(activeTab)
-    setTimeout(() => setCopied(''), 2000)
+  const handleCopy = async () => {
+    const text = activeTab === 'html' ? generateHTML() : generateCSS()
+    
+    try {
+      // Try modern clipboard API first
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        // Fallback for older browsers or insecure contexts
+        const textArea = document.createElement('textarea')
+        textArea.value = text
+        textArea.style.position = 'fixed'
+        textArea.style.opacity = '0'
+        document.body.appendChild(textArea)
+        textArea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textArea)
+      }
+      setCopied(activeTab)
+      setTimeout(() => setCopied(''), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+      // Fallback: show text for manual copy
+      const textArea = document.createElement('textarea')
+      textArea.value = text
+      document.body.appendChild(textArea)
+      textArea.select()
+      alert('Failed to copy automatically. Text has been selected - press Ctrl+C to copy manually.')
+      document.body.removeChild(textArea)
+    }
   }
 
   // Download all images as separate files

@@ -2,6 +2,14 @@
 
 ## 🎉 All New Features Implemented
 
+### ✅ NEW: **Area Drag (Lasso Select & Move)**
+- **Drag di area kosong**: Drag mouse di canvas kosong untuk membuat selection area
+- **Auto-detect elements**: Semua element yang center-nya ada di dalam area akan ter-select
+- **Release to grab**: Lepas mouse, area berubah jadi "grab mode"
+- **Drag to move**: Drag lagi untuk memindahkan semua element sekaligus
+- **Posisi relatif tetap**: Semua element bergerak bareng dengan posisi relatif mereka tetap sama (absolute)
+- **Click anywhere to release**: Klik di mana saja untuk melepas selection
+
 ### ✅ 1. **Undo/Redo System**
 - **Keyboard Shortcuts**: 
   - `Ctrl+Z` - Undo
@@ -104,6 +112,13 @@
 ---
 
 ## 🎨 **How to Use New Features**
+
+### **Area Drag / Lasso Select (NEW!)**
+1. **Drag di area kosong** canvas untuk membuat selection box (hijau)
+2. **Lepas mouse** - jika ada element di dalam, box berubah jadi "grab mode"
+3. **Drag lagi** untuk memindahkan semua element sekaligus
+4. Posisi relatif antar element tetap sama
+5. **Klik di mana saja** untuk melepas selection
 
 ### **Multi-Select**
 1. Hold `Shift` dan klik elemen untuk add/remove dari selection
